@@ -1,0 +1,15 @@
+# MinIO Credentials (KEEP SECRET)
+minio.properties
+
+# Downloaded MinIO Client Binaries
+mc
+mc.exe
+
+# Locally synced CDN data/folders
+esewa_gprs/
+*.json
+*.html
+*.png
+
+# OS generated files
+.DS_Store

@@ -1,0 +1,4 @@
+MINIO_URL=http://10.13.194.171:9000/
+MINIO_ACCESS_KEY=your_dev_username
+MINIO_SECRET_KEY=your_dev_password
+MINIO_BUCKET=cdn
