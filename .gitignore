@@ -1,12 +1,13 @@
 # MinIO Credentials (KEEP SECRET)
 minio.properties
+cdn_locations.properties
 
 # Downloaded MinIO Client Binaries
 mc
 mc.exe
 
 # Locally synced CDN data/folders
-esewa_gprs/
+mock_gprs/
 *.json
 *.html
 *.png

@@ -28,24 +28,9 @@ set -a
 source "$PROPERTIES_FILE"
 set +a
 
-# 2. Check if GlobalProtect VPN is on
-echo "--> Checking GlobalProtect VPN status..."
-VPN_ON=false
+# Default base segment if not set in properties
+BASE_SEG="${BASE_SEGMENT:-mock_dir}"
 
-# Check if the GlobalProtect background process is running
-if pgrep -i "GlobalProtect" > /dev/null; then
-    # Additionally, check if a VPN interface (gpd or utun) is active
-    if ifconfig | grep -qE "^gpd[0-9]+|^utun[0-9]+"; then
-        VPN_ON=true
-    fi
-fi
-
-if [ "$VPN_ON" = false ]; then
-    echo "Error: GlobalProtect VPN does not appear to be connected."
-    echo "Please connect to ESEWA-SECURE-GATEWAY and try again."
-    exit 1
-fi
-echo "    [OK] VPN appears to be active."
 
 # 3. Check for MinIO Client tool
 MC_BIN="mc"
@@ -58,6 +43,7 @@ elif ! command -v mc &> /dev/null; then
 fi
 
 # 4. Check if login access is needed and apply credentials
+echo "--> Note: A VPN connection is required to access the MinIO server."
 echo "--> Applying MinIO login credentials..."
 $MC_BIN alias set dev-cdn "$MINIO_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
 if [ $? -ne 0 ]; then
@@ -96,9 +82,9 @@ resolve_mock_path() {
     # Strip leading slashes to prevent writing/uploading to root filesystem path
     path="${path#/}"
     
-    # Always have a default start path as esewa_gprs
-    if [[ "$path" != "esewa_gprs/"* ]] && [[ "$path" != "esewa_gprs" ]]; then
-        path="esewa_gprs/$path"
+    # Always have a default start path as $BASE_SEG
+    if [[ "$path" != "$BASE_SEG/"* ]] && [[ "$path" != "$BASE_SEG" ]]; then
+        path="$BASE_SEG/$path"
     fi
 
     echo "$path"
@@ -123,9 +109,9 @@ if [ "$COMMAND" = "upload" ]; then
         MOCK_PATH=$(resolve_mock_path "$MOCK_ARG")
         TARGET_FILE=$TARGET_ARG
         
-        # Prepend esewa_gprs/ to the local file path if it doesn't already have it
-        if [[ "$TARGET_FILE" != "esewa_gprs/"* ]] && [[ "$TARGET_FILE" != "esewa_gprs" ]]; then
-            TARGET_FILE="esewa_gprs/$TARGET_FILE"
+        # Prepend $BASE_SEG/ to the local file path if it doesn't already have it
+        if [[ "$TARGET_FILE" != "$BASE_SEG/"* ]] && [[ "$TARGET_FILE" != "$BASE_SEG" ]]; then
+            TARGET_FILE="$BASE_SEG/$TARGET_FILE"
         fi
     fi
 

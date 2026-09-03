@@ -1,0 +1,3 @@
+# Example keys and locations for CDN Mock Data
+EXAMPLE_API_KEY=/example/api/path.json
+ANOTHER_MOCK_DATA=/mock/data_file.json
