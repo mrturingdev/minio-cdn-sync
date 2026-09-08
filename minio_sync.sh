@@ -23,10 +23,35 @@ if [ ! -f "$PROPERTIES_FILE" ]; then
     exit 1
 fi
 
-# Source the properties file
-set -a
-source "$PROPERTIES_FILE"
-set +a
+# Parse the properties file as plain KEY=VALUE pairs.
+# Deliberately not `source`d: sourcing executes the file as bash, so any shell
+# metacharacter in a credential value would be evaluated instead of read literally.
+while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+        ''|'#'*) continue ;;
+        *'='*) ;;
+        *) continue ;;
+    esac
+    prop_key="${line%%=*}"
+    prop_value="${line#*=}"
+    prop_key="${prop_key#"${prop_key%%[![:space:]]*}"}"
+    prop_key="${prop_key%"${prop_key##*[![:space:]]}"}"
+    prop_value="${prop_value#"${prop_value%%[![:space:]]*}"}"
+    if [[ "$prop_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        printf -v "$prop_key" '%s' "$prop_value"
+    fi
+done < "$PROPERTIES_FILE"
+unset line prop_key prop_value
+
+# 2. Required settings must be present and non-empty
+for required in MINIO_URL MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BUCKET; do
+    if [ -z "${!required}" ]; then
+        echo "Error: $required is not set in $PROPERTIES_FILE" >&2
+        exit 1
+    fi
+done
+unset required
 
 # Default base segment if not set in properties
 BASE_SEG="${BASE_SEGMENT:-mock_dir}"
@@ -42,21 +67,44 @@ elif ! command -v mc &> /dev/null; then
     exit 1
 fi
 
-# 4. Check if login access is needed and apply credentials
-echo "--> Note: A VPN connection is required to access the MinIO server."
-echo "--> Applying MinIO login credentials..."
-$MC_BIN alias set dev-cdn "$MINIO_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to configure MinIO credentials. Please check minio.properties."
+# 4. Build the MinIO connection for this run.
+# Credentials reach mc through MC_HOST_<alias> in its environment rather than as
+# command-line arguments, so they do not appear in `ps` output and are not written
+# to the global ~/.mc/config.json.
+if [ "$MINIO_URL" = "${MINIO_URL#*://}" ]; then
+    echo "Error: MINIO_URL must include a scheme, e.g. http://host:port" >&2
     exit 1
 fi
-echo "    [OK] Credentials applied."
+MINIO_SCHEME="${MINIO_URL%%://*}"
+MINIO_HOSTPORT="${MINIO_URL#*://}"
+MINIO_HOSTPORT="${MINIO_HOSTPORT%%/*}"
+
+# mc reads MC_HOST_<alias> literally and does NOT percent-decode the userinfo,
+# so the credentials must be inserted verbatim. That means a credential containing
+# a character which is structural in a URL cannot be represented here; refuse
+# rather than send a silently wrong signature.
+case "$MINIO_ACCESS_KEY$MINIO_SECRET_KEY" in
+    *[@:/?#]*|*[[:space:]]*)
+        echo "Error: MINIO_ACCESS_KEY or MINIO_SECRET_KEY contains one of @ : / ? # or whitespace." >&2
+        echo "Those cannot be passed to mc through MC_HOST. Rotate the credential to one" >&2
+        echo "without them, or configure an mc alias manually and adjust this script." >&2
+        exit 1
+        ;;
+esac
+MC_HOST_VALUE="$MINIO_SCHEME://$MINIO_ACCESS_KEY:$MINIO_SECRET_KEY@$MINIO_HOSTPORT"
+
+mc_run() {
+    env "MC_HOST_dev-cdn=$MC_HOST_VALUE" "$MC_BIN" "$@"
+}
+
+echo "--> Note: A VPN connection is required to access the MinIO server."
 
 # 5. Check Bucket Access
 echo "--> Verifying access to bucket '$MINIO_BUCKET'..."
-if ! $MC_BIN ls dev-cdn/"$MINIO_BUCKET" > /dev/null 2>&1; then
-    echo "Error: Cannot access bucket '$MINIO_BUCKET'."
-    echo "Please verify your MinIO URL, credentials, and bucket existence."
+if ! mc_run ls dev-cdn/"$MINIO_BUCKET" > /dev/null 2>&1; then
+    echo "Error: Cannot access bucket '$MINIO_BUCKET'." >&2
+    echo "Check your VPN connection first - that is the most common cause." >&2
+    echo "Then verify MINIO_URL, credentials, and bucket existence in $PROPERTIES_FILE." >&2
     exit 1
 fi
 echo "    [OK] Bucket is accessible."
@@ -68,10 +116,12 @@ resolve_mock_path() {
     local path="$1"
     local cdn_file="$SCRIPT_DIR/cdn_locations.properties"
     
-    # If the provided path doesn't contain a slash, it might be a key
+    # If the provided path doesn't contain a slash, it might be a key.
+    # Matched literally (not as a regex) and the whole remainder of the line is
+    # taken, so values containing '=' are not truncated.
     if [[ ! "$path" == *"/"* ]] && [ -f "$cdn_file" ]; then
         local resolved
-        resolved=$(grep "^${path}=" "$cdn_file" | cut -d'=' -f2)
+        resolved=$(awk -v k="$path" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }' "$cdn_file")
         if [ -n "$resolved" ]; then
             # Print to stderr so it doesn't get captured by $(...)
             echo "--> Resolved key '$path' to path: $resolved" >&2
@@ -87,6 +137,15 @@ resolve_mock_path() {
         path="$BASE_SEG/$path"
     fi
 
+    # Refuse '..' segments: they would let a crafted key or path escape
+    # $BASE_SEG, both for the remote object key and for the local download target.
+    case "/$path/" in
+        */../*)
+            echo "Error: path may not contain '..' segments: $path" >&2
+            return 1
+            ;;
+    esac
+
     echo "$path"
 }
 
@@ -101,18 +160,13 @@ if [ "$COMMAND" = "upload" ]; then
     
     if [ -z "$MOCK_ARG" ]; then
         # If only one argument is provided, we assume it's the key (or path) for both local and remote.
-        RESOLVED_PATH=$(resolve_mock_path "$TARGET_ARG")
+        RESOLVED_PATH=$(resolve_mock_path "$TARGET_ARG") || exit 1
         TARGET_FILE="$RESOLVED_PATH"
         MOCK_PATH="$RESOLVED_PATH"
     else
         # If two arguments are provided, resolve the mock path normally
-        MOCK_PATH=$(resolve_mock_path "$MOCK_ARG")
+        MOCK_PATH=$(resolve_mock_path "$MOCK_ARG") || exit 1
         TARGET_FILE=$TARGET_ARG
-        
-        # Prepend $BASE_SEG/ to the local file path if it doesn't already have it
-        if [[ "$TARGET_FILE" != "$BASE_SEG/"* ]] && [[ "$TARGET_FILE" != "$BASE_SEG" ]]; then
-            TARGET_FILE="$BASE_SEG/$TARGET_FILE"
-        fi
     fi
 
     if [ ! -f "$TARGET_FILE" ]; then
@@ -123,11 +177,14 @@ if [ "$COMMAND" = "upload" ]; then
     echo "Uploading '$TARGET_FILE'..."
     echo "Destination: dev-cdn/$MINIO_BUCKET/$MOCK_PATH"
     
-    $MC_BIN cp "$TARGET_FILE" "dev-cdn/$MINIO_BUCKET/$MOCK_PATH"
+    if ! mc_run cp "$TARGET_FILE" "dev-cdn/$MINIO_BUCKET/$MOCK_PATH"; then
+        echo "Error: Upload failed for '$TARGET_FILE'." >&2
+        exit 1
+    fi
     echo "--> Upload complete!"
 
 elif [ "$COMMAND" = "download" ]; then
-    MOCK_PATH=$(resolve_mock_path "$2")
+    MOCK_PATH=$(resolve_mock_path "$2") || exit 1
 
     if [ -z "$MOCK_PATH" ]; then
         show_usage
@@ -143,7 +200,10 @@ elif [ "$COMMAND" = "download" ]; then
     echo "Downloading 'dev-cdn/$MINIO_BUCKET/$MOCK_PATH'..."
     echo "Destination: $MOCK_PATH"
     
-    $MC_BIN cp "dev-cdn/$MINIO_BUCKET/$MOCK_PATH" "$MOCK_PATH"
+    if ! mc_run cp "dev-cdn/$MINIO_BUCKET/$MOCK_PATH" "$MOCK_PATH"; then
+        echo "Error: Download failed for 'dev-cdn/$MINIO_BUCKET/$MOCK_PATH'." >&2
+        exit 1
+    fi
     echo "--> Download complete!"
 
 else

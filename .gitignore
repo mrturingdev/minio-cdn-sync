@@ -7,10 +7,31 @@ mc
 mc.exe
 
 # Locally synced CDN data/folders
+# The local base-segment directory is whatever BASE_SEGMENT is set to, so the
+# broad asset patterns below deliberately cover synced content whatever it is named.
 mock_gprs/
+mock_dir/
 *.json
 *.html
 *.png
+*.js
+*.css
+*.svg
+*.pdf
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.woff
+*.woff2
+
+# Local tooling artifacts
+.claude-flow/
+.swarm/
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
 
 # OS generated files
 .DS_Store
