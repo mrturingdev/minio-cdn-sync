@@ -61,9 +61,11 @@ BASE_SEG="${BASE_SEGMENT:-mock_dir}"
 MC_BIN="mc"
 if [ -x "$SCRIPT_DIR/mc" ]; then
     MC_BIN="$SCRIPT_DIR/mc"
+elif [ -x "$SCRIPT_DIR/mc.exe" ]; then
+    MC_BIN="$SCRIPT_DIR/mc.exe"
 elif ! command -v mc &> /dev/null; then
     echo "MinIO Client (mc) could not be found."
-    echo "Please ensure the local 'mc' binary is downloaded or install via: brew install minio/stable/mc"
+    echo "Please ensure the local 'mc' (or 'mc.exe' on Windows) binary is downloaded, or install via: brew install minio/stable/mc"
     exit 1
 fi
 

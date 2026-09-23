@@ -11,12 +11,18 @@ This tool helps developers quickly upload and download mock CDN assets to our Mi
      `curl -L -s https://dl.min.io/client/mc/release/darwin-arm64/mc -o mc && chmod +x mc`
    - **Linux:** Download into this folder as well:
      `wget https://dl.min.io/client/mc/release/linux-amd64/mc -O mc && chmod +x mc`
-   - *Alternatively, you can install it globally via Homebrew:* `brew install minio/stable/mc`
+   - **Windows:** Download `mc.exe` into this folder. Run this from **Git Bash**
+     or PowerShell:
+     `curl -L -s https://dl.min.io/client/mc/release/windows-amd64/mc.exe -o mc.exe`
+     The script itself is bash, so on Windows drive it from **Git Bash** or
+     **WSL** (Git Bash can run the downloaded `mc.exe` directly).
+   - *Alternatively, install it globally via Homebrew:* `brew install minio/stable/mc`
    - The script hands credentials to `mc` through the `MC_HOST_dev-cdn` environment
      variable, so it needs a reasonably recent `mc`. Verified against
      `RELEASE.2025-08-13`; any current release works.
-   - **Note:** if a local `./mc` binary exists in this folder, it takes priority over a
-     globally installed one. Delete the local copy if you want to use the Homebrew version.
+   - **Note:** if a local `./mc` (or `./mc.exe` on Windows) binary exists in this
+     folder, it takes priority over a globally installed one. Delete the local copy
+     if you want to use the Homebrew version.
 
 2. **Configure Credentials**
    - Copy `minio.properties.template` to a new file named `minio.properties`.
